@@ -45,7 +45,32 @@ struct Asset {
 }
 ```
 
-## External Interface
+## Interface Structure
+
+### `ITypes`
+
+Contains shared type definitions:
+
+```solidity
+interface ITypes {
+    struct Signature {
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    struct Channel {
+        address[] participants; // Always length 2: [Host, Guest]
+        address adjudicator;    // Address of the contract that validates final states
+        uint64 nonce;           // Unique per channel with same participants and adjudicator
+    }
+
+    struct Asset {
+        address token;    // ERC-20 token contract
+        uint256 amount;   // Token amount
+    }
+}
+```
 
 ### `IAdjudicator`
 
@@ -54,54 +79,84 @@ The adjudicator contract must implement:
 ```solidity
 interface IAdjudicator {
     function adjudicate(
-        bytes calldata state
+        Channel calldata chan,
+        bytes calldata candidate,
+        bytes[] calldata proofs
     ) external view returns (
         bool valid,
-        Asset[2] memory outcome
+        ITypes.Asset[2] memory outcome
     );
 }
 ```
 
 - **Parameters**:
-  - `state`: ABI Encoded off-chain state (e.g., game data).
-  Contains a versioning to be able to challenge with more recent state and participant signatures
+  - `chan`: Channel configuration
+  - `candidate`: ABI encoded off-chain state (e.g., game data)
+  - `proofs`: Additional data for state validation
 - **Returns**:
-  - `valid`: Whether the off-chain `state` is valid given the game logic and signatures.
-  - `outcome`: The final split of tokens for `[Host, Guest]` if `valid` is true.
+  - `valid`: Whether the candidate state is valid given the proofs
+  - `outcome`: The final split of tokens for `[Host, Guest]` if `valid` is true
 
-## Contract Functions (Conceptual)
+## IStateChannel Interface
+
+The main state channel interface implements:
+
+```solidity
+interface IChannel {
+    function open(
+        ITypes.Channel calldata ch,
+        ITypes.Asset calldata deposit
+    ) external returns (bytes32 channelId);
+    
+    function close(
+        bytes32 channelId,
+        bytes calldata state,
+        ITypes.Signature[2] calldata signatures
+    ) external;
+    
+    function challenge(
+        bytes32 channelId,
+        bytes calldata state
+    ) external;
+    
+    function reclaim(
+        bytes32 channelId
+    ) external;
+}
+```
+
+### Function Details
 
 1. **Open Channel**  
-   `open(Channel ch, Asset deposit) return bytes32`
-   - **Purpose**: Open or join a channel by depositing `asset` into the contract from the caller.
+   `open(ITypes.Channel ch, ITypes.Asset deposit) returns (bytes32 channelId)`
+   - **Purpose**: Open or join a channel by depositing assets into the contract.
    - **Effects**:  
-     - Transfers token amounts in `asset` from the caller to the contract.
-     - Emit Events
-     - Return ChannelId
-     - Marks channel as open.
+     - Transfers token amounts from the caller to the contract
+     - Returns unique channelId
+     - Marks channel as open
 
 2. **Close Channel (Mutual Close)**  
-   `close(bytes32 chId, bytes state, Signature[2])`  
+   `close(bytes32 channelId, bytes state, ITypes.Signature[2] signatures)`  
    - **Purpose**: Finalize the channel immediately with a mutually signed state.
    - **Logic**:
-     - Calls `adjudicate(state, sigs)` on `ch.adjudicator`.
-     - If `valid` is `true`, distributes tokens according to `outcome`.
-     - Closes the channel.
+     - Verifies signatures from both participants
+     - Calls `adjudicate` on the channel's adjudicator
+     - If valid, distributes tokens according to outcome
+     - Closes the channel
 
 3. **Challenge Channel**  
-   `challenge(bytes32 chId, bytes state)`  
-   - **Purpose**: Unilaterally post a latest known state when the other party is uncooperative.
-   - **Subsequent calls**: Counter an ongoing challenge with a *newer* state (strictly higher `version` inside state).
+   `challenge(bytes32 channelId, bytes state)`  
+   - **Purpose**: Unilaterally post a state when the other party is uncooperative.
    - **Logic**:
-     - Verifies the submitted state is valid via `adjudicate`.
-     - Records the proposed outcome and starts the "challenge period."
+     - Verifies the submitted state is valid via `adjudicate`
+     - Records the proposed outcome and starts the challenge period
 
-5. **Finalize Challenge**  
-   `reclaim(bytes32 chId)`  
-   - **Purpose**: Conclude the channel after the challenge period expires, if uncontested or if no newer state supersedes the last posted outcome.
+4. **Finalize Challenge**  
+   `reclaim(bytes32 channelId)`  
+   - **Purpose**: Conclude the channel after challenge period expires.
    - **Logic**:  
-     - Distributes tokens according to the last proposed outcome.
-     - Closes the channel.
+     - Distributes tokens according to the last valid outcome
+     - Closes the channel
 
 ## High-Level Flow
 
