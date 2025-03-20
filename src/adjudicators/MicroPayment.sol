@@ -91,7 +91,7 @@ contract MicroPayment is IAdjudicator {
     {
         // Assuming a total deposit of 100 ether (as in the tests)
         uint256 totalFunds = 100 ether;
-        
+
         // Host gets deposit minus payment
         outcome[0] = ITypes.Asset({
             token: voucher.payment.token,

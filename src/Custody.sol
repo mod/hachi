@@ -31,7 +31,6 @@ contract Custody is IChannel {
         OPENED, // Channel fully funded
         CLOSED, // Channel closed
         CHALLENGED // Channel in challenge period
-
     }
 
     // Channel metadata

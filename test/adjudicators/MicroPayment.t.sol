@@ -23,7 +23,7 @@ contract MicroPaymentTest is Test {
 
     // Channel constants
     uint64 private constant CHANNEL_NONCE = 1;
-    uint256 private constant INITIAL_DEPOSIT = 100 * 10**18;
+    uint256 private constant INITIAL_DEPOSIT = 100 * 10 ** 18;
 
     function setUp() public {
         // Deploy contracts
