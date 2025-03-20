@@ -52,6 +52,10 @@ contract Custody is IChannel {
      * @param deposit Assets to deposit by the caller
      * @return channelId Unique identifier for the channel
      */
+    // FIXME: if only one party funds, and the other disappears, the funds are stuck and cannot be challenged or reclaimed.
+    // FIXME: "calling 'open'" approach PROHIBITS CROSS-CHAIN channels, as it requires BOTH parties to call OPEN on the same chain.
+    // To overcome this, a channel should have a mechanism to move from PARTIALLY_FUNDED to OPENED without second party interaction.
+    // One way to achieve this is to supply a VALID state proclaiming "FUNDING IS DONE", as it is implemented in Nitro :wink:.
     function open(Channel calldata ch, Asset calldata deposit) external override returns (bytes32 channelId) {
         // Validate participants array length
         if (ch.participants.length != 2) {
@@ -75,6 +79,7 @@ contract Custody is IChannel {
 
         // Transfer deposit to this contract
         if (deposit.amount > 0) {
+            // TODO: native asset support
             bool success = IERC20(deposit.token).transferFrom(msg.sender, address(this), deposit.amount);
 
             if (!success) {
@@ -82,6 +87,7 @@ contract Custody is IChannel {
             }
         }
 
+        // FIXME: there is no execution path that results in Status.PARTIAL
         // Record deposit in outcome based on caller
         if (msg.sender == ch.participants[0]) {
             meta.outcome[0] = deposit;
@@ -118,6 +124,11 @@ contract Custody is IChannel {
         Channel memory chan = meta.chan;
         bytes32 stateHash = keccak256(abi.encode(state));
 
+        // NOTE: the approach of signing states, that MAY include signatures is interesting.
+        // On one hand there is signature duplication (participant sign something that already contains their signature),
+        // while on the other hand it differentiates ordinary states and final ones, which removes the need for `isFinal` state field.
+        // TODO: this, however, may pose a threat, as it imposes an implicit security requirement for Adjudicator to ALWAYS include signatures alongside meaningful data in State.data
+        // This should be done to protect against a situation, when signatures of both parties can be extracted from State.data, and the other data that is left still encodes a VALID state, supported by the Adjudicator.
         if (!verifySignature(chan.participants[0], stateHash, signatures[0])) {
             revert InvalidSignature();
         }
@@ -144,6 +155,8 @@ contract Custody is IChannel {
         meta.status = Status.CLOSED;
     }
 
+    // FIXME: implement `checkpoint` to allow moving from `CHALLENGED` to `OPENED` state
+
     /**
      * @notice Unilaterally post a state when the other party is uncooperative
      * @param channelId Unique identifier for the channel
@@ -165,9 +178,15 @@ contract Custody is IChannel {
         }
 
         // Prepare proofs array including previous state if this is a counter-challenge
+        // FIXME: I think proofs are meant to be passed to `challenge` directly
         State[] memory proofs = new State[](0);
         if (meta.status == Status.CHALLENGED) {
             proofs = new State[](1);
+            // TODO: imagine parties are already at imaginary turnNum 100, where outcome is not it Bob's favor.
+            // Bob challenges with imaginary turnNum 1, it passes. Then, Alice would want to challenge Bob's 1 with state 100.
+            // But when doing that, the Adjudicator application will receive the state 100 as candidate and state 1 as proof, which may not be correct.
+            // This means that Adjudicator app needs to be able to handle VALID candidates with ANY PREVIOUS VALID state as proof.
+            // NOTE: this basically removes the need for turnNumbers (for good case), and moves efforts in unhappy case, which is now harder to support in Adjudicator app.
             proofs[0] = meta.lastValidState;
         }
 
@@ -224,6 +243,7 @@ contract Custody is IChannel {
 
         // Distribute to Host (participant[0])
         if (outcome[0].amount > 0) {
+            // NOTE: GOOD simplification for THIS APP ONLY is to only support 1 asset per participant in outcome
             bool success = IERC20(outcome[0].token).transfer(participants[0], outcome[0].amount);
 
             if (!success) {
@@ -248,6 +268,7 @@ contract Custody is IChannel {
      * @param signature The signature to verify
      * @return valid Whether the signature is valid
      */
+    // TODO: can be substituted with OpenZeppelin's ECDSA.sol library
     function verifySignature(address signer, bytes32 hash, Signature memory signature)
         private
         pure

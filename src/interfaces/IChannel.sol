@@ -14,6 +14,7 @@ interface IChannel {
      * @param deposit Assets to deposit by the caller
      * @return channelId Unique identifier for the channel
      */
+    // FIXME: such interface limits channels to support only 1 asset per participant!
     function open(Channel calldata ch, Asset calldata deposit) external returns (bytes32 channelId);
 
     /**
