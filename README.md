@@ -55,28 +55,26 @@ struct Asset {
 
 ## Interface Structure
 
-### `ITypes`
+### `Types`
 
 Contains shared type definitions:
 
 ```solidity
-interface ITypes {
-    struct Signature {
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-    }
+struct Signature {
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
+}
 
-    struct Channel {
-        address[] participants; // Always length 2: [Host, Guest]
-        address adjudicator;    // Address of the contract that validates final states
-        uint64 nonce;           // Unique per channel with same participants and adjudicator
-    }
+struct Channel {
+    address[] participants; // Always length 2: [Host, Guest]
+    address adjudicator;    // Address of the contract that validates final states
+    uint64 nonce;           // Unique per channel with same participants and adjudicator
+}
 
-    struct Asset {
-        address token;    // ERC-20 token contract
-        uint256 amount;   // Token amount
-    }
+struct Asset {
+    address token;    // ERC-20 token contract
+    uint256 amount;   // Token amount
 }
 ```
 
@@ -92,7 +90,7 @@ interface IAdjudicator {
         bytes[] calldata proofs
     ) external view returns (
         bool valid,
-        ITypes.Asset[2] memory outcome
+        Asset[2] memory outcome
     );
 }
 ```
@@ -112,14 +110,14 @@ The main state channel interface implements:
 ```solidity
 interface IChannel {
     function open(
-        ITypes.Channel calldata ch,
-        ITypes.Asset calldata deposit
+        Channel calldata ch,
+        Asset calldata deposit
     ) external returns (bytes32 channelId);
     
     function close(
         bytes32 channelId,
         bytes calldata state,
-        ITypes.Signature[2] calldata signatures
+        Signature[2] calldata signatures
     ) external;
     
     function challenge(
@@ -136,7 +134,7 @@ interface IChannel {
 ### Function Details
 
 1. **Open Channel**  
-   `open(ITypes.Channel ch, ITypes.Asset deposit) returns (bytes32 channelId)`
+   `open(Channel ch, Asset deposit) returns (bytes32 channelId)`
    - **Purpose**: Open or join a channel by depositing assets into the contract.
    - **Effects**:  
      - Transfers token amounts from the caller to the contract
@@ -144,7 +142,7 @@ interface IChannel {
      - Marks channel as open
 
 2. **Close Channel (Mutual Close)**  
-   `close(bytes32 channelId, bytes state, ITypes.Signature[2] signatures)`  
+   `close(bytes32 channelId, bytes state, Signature[2] signatures)`  
    - **Purpose**: Finalize the channel immediately with a mutually signed state.
    - **Logic**:
      - Verifies signatures from both participants
@@ -190,7 +188,7 @@ src
 └── interfaces
     ├── IAdjudicator.sol
     ├── IChannel.sol
-    └── ITypes.sol
+    └── sol
 ```
 
 ### Custody.sol implementation
@@ -212,8 +210,8 @@ src
     }
 
     struct Metadata {
-        ITypes.Channel  chan;
-        ITypes.Asset[2] outcome;
+        Channel  chan;
+        Asset[2] outcome;
         Status          status;
         uint256         challengeExpire;
         bytes           lastValidState;
@@ -235,12 +233,12 @@ src
 ```solidity
 struct Voucher {
     uint64 version;
-    ITypes.Asset payment;
+    Asset payment;
 }
 
 struct SignedVoucher {
     Voucher voucher;
-    ITypes.Signature signature;
+    Signature signature;
 }
 ```
 

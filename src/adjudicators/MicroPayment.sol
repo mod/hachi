@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {IAdjudicator} from "../interfaces/IAdjudicator.sol";
-import {ITypes} from "../interfaces/ITypes.sol";
+import "../interfaces/Types.sol";
 
 /**
  * @title MicroPayment Adjudicator
@@ -22,7 +22,7 @@ contract MicroPayment is IAdjudicator {
      */
     struct Voucher {
         uint64 version;
-        ITypes.Asset payment;
+        Asset payment;
     }
 
     /**
@@ -32,7 +32,7 @@ contract MicroPayment is IAdjudicator {
      */
     struct SignedVoucher {
         Voucher voucher;
-        ITypes.Signature signature;
+        Signature signature;
     }
 
     /**
@@ -43,14 +43,14 @@ contract MicroPayment is IAdjudicator {
      * @return valid Whether the candidate state is valid
      * @return outcome Final asset distribution [Host, Guest]
      */
-    function adjudicate(ITypes.Channel calldata chan, bytes calldata candidate, bytes[] calldata proofs)
+    function adjudicate(Channel calldata chan, State calldata candidate, State[] calldata proofs)
         external
         view
         override
-        returns (bool valid, ITypes.Asset[2] memory outcome)
+        returns (bool valid, Asset[] memory outcome)
     {
         // Decode candidate state
-        SignedVoucher memory candidateVoucher = abi.decode(candidate, (SignedVoucher));
+        SignedVoucher memory candidateVoucher = abi.decode(candidate.data, (SignedVoucher));
 
         // Create hash of just the voucher data for signature verification
         bytes32 stateHash = keccak256(abi.encode(candidateVoucher.voucher));
@@ -63,7 +63,7 @@ contract MicroPayment is IAdjudicator {
         // Check previous state if provided
         if (proofs.length > 0) {
             // Decode previous state
-            SignedVoucher memory previousVoucher = abi.decode(proofs[0], (SignedVoucher));
+            SignedVoucher memory previousVoucher = abi.decode(proofs[0].data, (SignedVoucher));
 
             // Ensure candidate version is higher than previous
             if (candidateVoucher.voucher.version <= previousVoucher.voucher.version) {
@@ -84,16 +84,20 @@ contract MicroPayment is IAdjudicator {
      * @param voucher Payment voucher
      * @return outcome Asset distribution [Host, Guest]
      */
-    function calculateOutcome(ITypes.Channel calldata chan, Voucher memory voucher)
+    function calculateOutcome(Channel calldata chan, Voucher memory voucher)
         internal
         pure
-        returns (ITypes.Asset[2] memory outcome)
+        returns (Asset[] memory outcome)
     {
         // Assuming a total deposit of 100 ether (as in the tests)
+        // FIXME fix allocation
         uint256 totalFunds = 100 ether;
 
+        // Initialize outcome array with length 2
+        outcome = new Asset[](2);
+
         // Host gets deposit minus payment
-        outcome[0] = ITypes.Asset({
+        outcome[0] = Asset({
             token: voucher.payment.token,
             amount: totalFunds - voucher.payment.amount // Host gets remaining funds
         });
@@ -111,11 +115,7 @@ contract MicroPayment is IAdjudicator {
      * @param signature The signature to verify
      * @return Whether the signature is valid
      */
-    function verifySignature(address signer, bytes32 hash, ITypes.Signature memory signature)
-        internal
-        pure
-        returns (bool)
-    {
+    function verifySignature(address signer, bytes32 hash, Signature memory signature) internal pure returns (bool) {
         // Recover signer from signature
         address recovered = ecrecover(hash, signature.v, signature.r, signature.s);
 

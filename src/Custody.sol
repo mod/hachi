@@ -3,7 +3,7 @@ pragma solidity ^0.8.13;
 
 import {IChannel} from "./interfaces/IChannel.sol";
 import {IAdjudicator} from "./interfaces/IAdjudicator.sol";
-import {ITypes} from "./interfaces/ITypes.sol";
+import "./interfaces/Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
@@ -31,15 +31,16 @@ contract Custody is IChannel {
         OPENED, // Channel fully funded
         CLOSED, // Channel closed
         CHALLENGED // Channel in challenge period
+
     }
 
     // Channel metadata
     struct Metadata {
-        ITypes.Channel chan;
-        ITypes.Asset[2] outcome;
+        Channel chan;
+        Asset[] outcome;
         Status status;
         uint256 challengeExpire;
-        bytes lastValidState;
+        State lastValidState;
     }
 
     // ChannelId to Metadata mapping
@@ -51,11 +52,7 @@ contract Custody is IChannel {
      * @param deposit Assets to deposit by the caller
      * @return channelId Unique identifier for the channel
      */
-    function open(ITypes.Channel calldata ch, ITypes.Asset calldata deposit)
-        external
-        override
-        returns (bytes32 channelId)
-    {
+    function open(Channel calldata ch, Asset calldata deposit) external override returns (bytes32 channelId) {
         // Validate participants array length
         if (ch.participants.length != 2) {
             revert InvalidParticipants();
@@ -70,6 +67,7 @@ contract Custody is IChannel {
         // If channel is new, initialize it
         if (meta.status == Status.VOID) {
             meta.chan = ch;
+            meta.outcome = new Asset[](2);
             meta.status = Status.PARTIAL;
         } else if (meta.status != Status.PARTIAL && meta.status != Status.OPENED) {
             revert InvalidStatus();
@@ -108,10 +106,7 @@ contract Custody is IChannel {
      * @param state The final state signed by both parties
      * @param signatures Array of signatures from both participants
      */
-    function close(bytes32 channelId, bytes calldata state, ITypes.Signature[2] calldata signatures)
-        external
-        override
-    {
+    function close(bytes32 channelId, State calldata state, Signature[2] calldata signatures) external override {
         Metadata storage meta = channels[channelId];
 
         // Check channel exists and is in the correct state
@@ -120,8 +115,8 @@ contract Custody is IChannel {
         }
 
         // Verify signatures from both participants
-        ITypes.Channel memory chan = meta.chan;
-        bytes32 stateHash = keccak256(state);
+        Channel memory chan = meta.chan;
+        bytes32 stateHash = keccak256(abi.encode(state));
 
         if (!verifySignature(chan.participants[0], stateHash, signatures[0])) {
             revert InvalidSignature();
@@ -132,10 +127,10 @@ contract Custody is IChannel {
         }
 
         // Use the adjudicator to validate the state and get the outcome
-        (bool valid, ITypes.Asset[2] memory outcome) = IAdjudicator(chan.adjudicator).adjudicate(
+        (bool valid, Asset[] memory outcome) = IAdjudicator(chan.adjudicator).adjudicate(
             chan,
             state,
-            new bytes[](0) // No proofs needed for mutual close
+            new State[](0) // No proofs needed for mutual close
         );
 
         if (!valid) {
@@ -154,7 +149,7 @@ contract Custody is IChannel {
      * @param channelId Unique identifier for the channel
      * @param state The latest known valid state
      */
-    function challenge(bytes32 channelId, bytes calldata state) external override {
+    function challenge(bytes32 channelId, State calldata state) external override {
         Metadata storage meta = channels[channelId];
 
         // Check channel exists and is in a valid state for challenge
@@ -162,7 +157,7 @@ contract Custody is IChannel {
             revert InvalidStatus();
         }
 
-        ITypes.Channel memory chan = meta.chan;
+        Channel memory chan = meta.chan;
 
         // Verify caller is a participant
         if (msg.sender != chan.participants[0] && msg.sender != chan.participants[1]) {
@@ -170,14 +165,14 @@ contract Custody is IChannel {
         }
 
         // Prepare proofs array including previous state if this is a counter-challenge
-        bytes[] memory proofs = new bytes[](0);
-        if (meta.status == Status.CHALLENGED && meta.lastValidState.length > 0) {
-            proofs = new bytes[](1);
+        State[] memory proofs = new State[](0);
+        if (meta.status == Status.CHALLENGED) {
+            proofs = new State[](1);
             proofs[0] = meta.lastValidState;
         }
 
         // Use the adjudicator to validate the state
-        (bool valid, ITypes.Asset[2] memory outcome) = IAdjudicator(chan.adjudicator).adjudicate(chan, state, proofs);
+        (bool valid, Asset[] memory outcome) = IAdjudicator(chan.adjudicator).adjudicate(chan, state, proofs);
 
         if (!valid) {
             revert InvalidState();
@@ -223,7 +218,10 @@ contract Custody is IChannel {
      * @param outcome Array of assets for each participant
      * @param participants Array of participant addresses
      */
-    function _distributeAssets(ITypes.Asset[2] memory outcome, address[] memory participants) private {
+    function _distributeAssets(Asset[] memory outcome, address[] memory participants) private {
+        // Ensure we have outcomes for both participants
+        require(outcome.length == 2, "Invalid outcome length");
+
         // Distribute to Host (participant[0])
         if (outcome[0].amount > 0) {
             bool success = IERC20(outcome[0].token).transfer(participants[0], outcome[0].amount);
@@ -250,7 +248,7 @@ contract Custody is IChannel {
      * @param signature The signature to verify
      * @return valid Whether the signature is valid
      */
-    function verifySignature(address signer, bytes32 hash, ITypes.Signature memory signature)
+    function verifySignature(address signer, bytes32 hash, Signature memory signature)
         private
         pure
         returns (bool valid)

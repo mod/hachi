@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import {Test} from "lib/forge-std/src/Test.sol";
 import {MicroPayment} from "../../src/adjudicators/MicroPayment.sol";
 import {Custody} from "../../src/Custody.sol";
-import {ITypes} from "../../src/interfaces/ITypes.sol";
+import "../../src/interfaces/Types.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 
@@ -53,18 +53,18 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Host opens the channel
         vm.prank(host);
-        ITypes.Asset memory hostDeposit = ITypes.Asset({token: address(token), amount: INITIAL_DEPOSIT});
+        Asset memory hostDeposit = Asset({token: address(token), amount: INITIAL_DEPOSIT});
 
         bytes32 channelId = custody.open(channel, hostDeposit);
 
         // Guest joins the channel
         vm.prank(guest);
-        ITypes.Asset memory guestDeposit = ITypes.Asset({
+        Asset memory guestDeposit = Asset({
             token: address(token),
             amount: 0 // Guest doesn't need to deposit for a payment channel
         });
@@ -86,22 +86,27 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Create voucher
         MicroPayment.Voucher memory voucher =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount}), version: version});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount}), version: version});
 
         // Create signed voucher
         MicroPayment.SignedVoucher memory signedVoucher = createSignedVoucher(channel, voucher, hostKey);
         bytes memory encodedVoucher = abi.encode(signedVoucher);
 
+        // Create state data
+        State memory stateData;
+        stateData.data = encodedVoucher;
+        stateData.outcome = new Asset[](2);
+
         // Adjudicate the voucher
-        (bool valid, ITypes.Asset[2] memory outcome) = adjudicator.adjudicate(
+        (bool valid, Asset[] memory outcome) = adjudicator.adjudicate(
             channel,
-            encodedVoucher,
-            new bytes[](0) // No previous state
+            stateData,
+            new State[](0) // No previous state
         );
 
         assertTrue(valid);
@@ -115,15 +120,15 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Create first voucher
         uint64 version1 = 1;
         uint256 amount1 = 10 ether;
 
         MicroPayment.Voucher memory voucher1 =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount1}), version: version1});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount1}), version: version1});
 
         MicroPayment.SignedVoucher memory signedVoucher1 = createSignedVoucher(channel, voucher1, hostKey);
         bytes memory encodedVoucher1 = abi.encode(signedVoucher1);
@@ -133,17 +138,23 @@ contract MicroPaymentTest is Test {
         uint256 amount2 = 20 ether;
 
         MicroPayment.Voucher memory voucher2 =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount2}), version: version2});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount2}), version: version2});
 
         MicroPayment.SignedVoucher memory signedVoucher2 = createSignedVoucher(channel, voucher2, hostKey);
         bytes memory encodedVoucher2 = abi.encode(signedVoucher2);
 
         // Prepare proofs array with previous voucher
-        bytes[] memory proofs = new bytes[](1);
-        proofs[0] = encodedVoucher1;
+        State[] memory proofs = new State[](1);
+        proofs[0].data = encodedVoucher1;
+        proofs[0].outcome = new Asset[](2);
+
+        // Create state data for second voucher
+        State memory stateData;
+        stateData.data = encodedVoucher2;
+        stateData.outcome = new Asset[](2);
 
         // Adjudicate the second voucher
-        (bool valid, ITypes.Asset[2] memory outcome) = adjudicator.adjudicate(channel, encodedVoucher2, proofs);
+        (bool valid, Asset[] memory outcome) = adjudicator.adjudicate(channel, stateData, proofs);
 
         assertTrue(valid);
         assertEq(outcome[1].token, address(token)); // Guest payment token
@@ -156,15 +167,15 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Create first voucher with higher version
         uint64 version1 = 2;
         uint256 amount1 = 20 ether;
 
         MicroPayment.Voucher memory voucher1 =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount1}), version: version1});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount1}), version: version1});
 
         MicroPayment.SignedVoucher memory signedVoucher1 = createSignedVoucher(channel, voucher1, hostKey);
         bytes memory encodedVoucher1 = abi.encode(signedVoucher1);
@@ -174,18 +185,24 @@ contract MicroPaymentTest is Test {
         uint256 amount2 = 10 ether;
 
         MicroPayment.Voucher memory voucher2 =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount2}), version: version2});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount2}), version: version2});
 
         MicroPayment.SignedVoucher memory signedVoucher2 = createSignedVoucher(channel, voucher2, hostKey);
         bytes memory encodedVoucher2 = abi.encode(signedVoucher2);
 
         // Prepare proofs array with previous voucher
-        bytes[] memory proofs = new bytes[](1);
-        proofs[0] = encodedVoucher1;
+        State[] memory proofs = new State[](1);
+        proofs[0].data = encodedVoucher1;
+        proofs[0].outcome = new Asset[](2);
+
+        // Create state data for second voucher
+        State memory stateData;
+        stateData.data = encodedVoucher2;
+        stateData.outcome = new Asset[](2);
 
         // Adjudicate should revert with VersionNotHigher
         vm.expectRevert(MicroPayment.VersionNotHigher.selector);
-        adjudicator.adjudicate(channel, encodedVoucher2, proofs);
+        adjudicator.adjudicate(channel, stateData, proofs);
     }
 
     function test_RejectInvalidSignature() public {
@@ -194,23 +211,28 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Create voucher
         uint64 version = 1;
         uint256 amount = 10 ether;
 
         MicroPayment.Voucher memory voucher =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount}), version: version});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount}), version: version});
 
         // Sign with guest key instead of host key (invalid)
         MicroPayment.SignedVoucher memory signedVoucher = createSignedVoucher(channel, voucher, guestKey);
         bytes memory encodedVoucher = abi.encode(signedVoucher);
 
+        // Create state data for voucher
+        State memory stateData;
+        stateData.data = encodedVoucher;
+        stateData.outcome = new Asset[](2);
+
         // Adjudicate should revert with InvalidSignature
         vm.expectRevert(MicroPayment.InvalidSignature.selector);
-        adjudicator.adjudicate(channel, encodedVoucher, new bytes[](0));
+        adjudicator.adjudicate(channel, stateData, new State[](0));
     }
 
     function test_CloseWithMutualSignatures() public {
@@ -219,18 +241,18 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Host opens the channel
         vm.prank(host);
-        ITypes.Asset memory hostDeposit = ITypes.Asset({token: address(token), amount: INITIAL_DEPOSIT});
+        Asset memory hostDeposit = Asset({token: address(token), amount: INITIAL_DEPOSIT});
 
         bytes32 channelId = custody.open(channel, hostDeposit);
 
         // Guest joins the channel
         vm.prank(guest);
-        ITypes.Asset memory guestDeposit = ITypes.Asset({token: address(token), amount: 0});
+        Asset memory guestDeposit = Asset({token: address(token), amount: 0});
 
         custody.open(channel, guestDeposit);
 
@@ -239,28 +261,35 @@ contract MicroPaymentTest is Test {
         uint256 amount = 30 ether;
 
         MicroPayment.Voucher memory voucher =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount}), version: version});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount}), version: version});
 
         // Create signed voucher
         MicroPayment.SignedVoucher memory signedVoucher = createSignedVoucher(channel, voucher, hostKey);
-        bytes memory encodedState = abi.encode(signedVoucher);
+        bytes memory encodedVoucher = abi.encode(signedVoucher);
+
+        // Create state data
+        State memory stateData;
+        stateData.data = encodedVoucher;
+        stateData.outcome = new Asset[](2);
+        stateData.outcome[0] = Asset({token: address(token), amount: INITIAL_DEPOSIT - amount});
+        stateData.outcome[1] = Asset({token: address(token), amount: amount});
 
         // Both parties sign the same state for close
-        bytes32 closeMessageHash = keccak256(encodedState);
+        bytes32 closeMessageHash = keccak256(abi.encode(stateData));
 
         // Host signs
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(hostKey, closeMessageHash);
-        ITypes.Signature memory hostSig = ITypes.Signature({v: v1, r: r1, s: s1});
+        Signature memory hostSig = Signature({v: v1, r: r1, s: s1});
 
         // Guest signs
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guestKey, closeMessageHash);
-        ITypes.Signature memory guestSig = ITypes.Signature({v: v2, r: r2, s: s2});
+        Signature memory guestSig = Signature({v: v2, r: r2, s: s2});
 
-        ITypes.Signature[2] memory signatures = [hostSig, guestSig];
+        Signature[2] memory signatures = [hostSig, guestSig];
 
         // Close the channel
         vm.prank(guest);
-        custody.close(channelId, encodedState, signatures);
+        custody.close(channelId, stateData, signatures);
 
         // Verify funds distribution
         assertEq(token.balanceOf(host), INITIAL_DEPOSIT - amount);
@@ -273,18 +302,18 @@ contract MicroPaymentTest is Test {
         participants[0] = host;
         participants[1] = guest;
 
-        ITypes.Channel memory channel =
-            ITypes.Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
+        Channel memory channel =
+            Channel({participants: participants, adjudicator: address(adjudicator), nonce: CHANNEL_NONCE});
 
         // Host opens the channel
         vm.prank(host);
-        ITypes.Asset memory hostDeposit = ITypes.Asset({token: address(token), amount: INITIAL_DEPOSIT});
+        Asset memory hostDeposit = Asset({token: address(token), amount: INITIAL_DEPOSIT});
 
         bytes32 channelId = custody.open(channel, hostDeposit);
 
         // Guest joins the channel
         vm.prank(guest);
-        ITypes.Asset memory guestDeposit = ITypes.Asset({token: address(token), amount: 0});
+        Asset memory guestDeposit = Asset({token: address(token), amount: 0});
 
         custody.open(channel, guestDeposit);
 
@@ -293,15 +322,22 @@ contract MicroPaymentTest is Test {
         uint256 amount = 40 ether;
 
         MicroPayment.Voucher memory voucher =
-            MicroPayment.Voucher({payment: ITypes.Asset({token: address(token), amount: amount}), version: version});
+            MicroPayment.Voucher({payment: Asset({token: address(token), amount: amount}), version: version});
 
         // Create signed voucher
         MicroPayment.SignedVoucher memory signedVoucher = createSignedVoucher(channel, voucher, hostKey);
-        bytes memory encodedState = abi.encode(signedVoucher);
+        bytes memory encodedVoucher = abi.encode(signedVoucher);
+
+        // Create state data
+        State memory stateData;
+        stateData.data = encodedVoucher;
+        stateData.outcome = new Asset[](2);
+        stateData.outcome[0] = Asset({token: address(token), amount: INITIAL_DEPOSIT - amount});
+        stateData.outcome[1] = Asset({token: address(token), amount: amount});
 
         // Guest challenges with the voucher
         vm.prank(guest);
-        custody.challenge(channelId, encodedState);
+        custody.challenge(channelId, stateData);
 
         // Fast forward past challenge period
         vm.warp(block.timestamp + 3 days + 1);
@@ -316,7 +352,7 @@ contract MicroPaymentTest is Test {
     }
 
     // Helper function to create a signed voucher
-    function createSignedVoucher(ITypes.Channel memory channel, MicroPayment.Voucher memory voucher, uint256 privateKey)
+    function createSignedVoucher(Channel memory channel, MicroPayment.Voucher memory voucher, uint256 privateKey)
         internal
         view
         returns (MicroPayment.SignedVoucher memory)
@@ -329,7 +365,7 @@ contract MicroPaymentTest is Test {
 
         // Create the SignedVoucher structure with signature
         MicroPayment.SignedVoucher memory signedVoucher =
-            MicroPayment.SignedVoucher({voucher: voucher, signature: ITypes.Signature({v: v, r: r, s: s})});
+            MicroPayment.SignedVoucher({voucher: voucher, signature: Signature({v: v, r: r, s: s})});
 
         return signedVoucher;
     }
