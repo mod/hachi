@@ -38,7 +38,18 @@ Identifies a channel between exactly **two** participants (`participants[0]` is 
 struct Channel {
     address[] participants; // Always length 2: [Host, Guest]
     address adjudicator;    // Address of the contract that validates final states
-    uint64 nonce;           // Strictly increasing for each new off-chain state
+    uint64 nonce;           // Unique per channel with same participants and adjudicator
+}
+```
+
+### `State`
+
+Contains the application-specific data and outcome distribution:
+
+```solidity
+struct State {
+    bytes data;      // Application-specific state data
+    Asset[] outcome; // Asset distribution
 }
 ```
 
@@ -86,24 +97,24 @@ The adjudicator contract must implement:
 interface IAdjudicator {
     function adjudicate(
         Channel calldata chan,
-        bytes calldata candidate,
-        bytes[] calldata proofs
+        State calldata candidate,
+        State[] calldata proofs
     ) external view returns (
         bool valid,
-        Asset[2] memory outcome
+        Asset[] memory outcome
     );
 }
 ```
 
 - **Parameters**:
   - `chan`: Channel configuration
-  - `candidate`: ABI encoded off-chain state (e.g., game data)
-  - `proofs`: Additional data for state validation
+  - `candidate`: The State being validated, containing application-specific data
+  - `proofs`: Previous valid states for reference in validation
 - **Returns**:
   - `valid`: Whether the candidate state is valid given the proofs
-  - `outcome`: The final split of tokens for `[Host, Guest]` if `valid` is true
+  - `outcome`: The final split of tokens if `valid` is true
 
-## IStateChannel Interface
+## IChannel Interface
 
 The main state channel interface implements:
 
@@ -116,13 +127,13 @@ interface IChannel {
     
     function close(
         bytes32 channelId,
-        bytes calldata state,
+        State calldata state,
         Signature[2] calldata signatures
     ) external;
     
     function challenge(
         bytes32 channelId,
-        bytes calldata state
+        State calldata state
     ) external;
     
     function reclaim(
