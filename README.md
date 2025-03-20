@@ -8,6 +8,11 @@ This document describes a minimal **N-party state channel** that enables off-cha
 
 > **Note:** This is a high-level specification of types, interfaces, and function semantics—no implementation details are included.
 
+State channel infrastructure has two main components:
+
+- Channel Custody which can support and run adjudication on multiple channels
+- Adjudicators mini contracts which can validate state transitions to a candidate state against proofs
+
 ## Data Types
 
 ### `Signature`
@@ -21,6 +26,9 @@ struct Signature {
     bytes32 s;
 }
 ```
+
+The convention is to sign the `stateHash = keccak256(state)`
+EIP712 is not required to form signed state
 
 ### `Channel`
 
@@ -171,6 +179,70 @@ interface IChannel {
    - One party calls `challenge` with their most recent signed state.
    - The counterparty may respond with a *newer* state using `challenge`.
    - After the challenge period, `reclaim` settles funds according to the last posted valid state.
+
+## Files
+
+```
+src
+├── Custody.sol
+├── adjudicators
+│   └── MicroPayment.sol
+└── interfaces
+    ├── IAdjudicator.sol
+    ├── IChannel.sol
+    └── ITypes.sol
+```
+
+### Custody.sol implementation
+
+#### Requirements
+
+- Sign stateHash
+- Do not use EIP712
+- When submitting new challenge, previously submitted states into proofs of the adjudicator
+- Only state which adjudicator return valid can replace previously submitted state
+
+```solidity
+    enum Status {
+        VOID,
+        PARTIAL,  // Partial funding
+        OPENED,   // Channel funded
+        CLOSED,   // Channel closed
+        CHALLENGED
+    }
+
+    struct Metadata {
+        ITypes.Channel  chan;
+        ITypes.Asset[2] outcome;
+        Status          status;
+        uint256         challengeExpire;
+        bytes           lastValidState;
+    }
+
+    // ChannelId to Data
+    mapping(bytes32 => Metadata) private channels;
+```
+
+### MicroPayment.sol adjudicator
+
+#### Requirements
+
+- Validate state is signed by Host
+- Candidate `version` is higher than proofs
+- Do not use EIP712
+- Use `stateHash = keccak256(SignedVoucher)`
+
+```solidity
+struct Voucher {
+    uint64 version;
+    ITypes.Asset payment;
+}
+
+struct SignedVoucher {
+    Voucher voucher;
+    ITypes.Signature signature;
+}
+```
 
 ## Example Scenario (Tic-Tac-Toe)
 
